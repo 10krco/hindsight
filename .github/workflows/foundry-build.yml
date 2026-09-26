@@ -31,6 +31,8 @@ jobs:
           npx tsc --noEmit
           npm test
           npm pack --dry-run --ignore-scripts --json > /tmp/hindsight-coding-agents-pack.json
-          node -e 'const p=require("/tmp/hindsight-coding-agents-pack.json")[0]; for(const f of ["dist/pi.js","dist/status.js","skill/SKILL.md","LICENSE"]) if(!p.files.some(e=>e.path===f)) process.exitCode=1'
+          # npm 10 prints prepare-script output before its JSON even with
+          # --ignore-scripts; consume only the final packed metadata object.
+          node -e 'const s=require("node:fs").readFileSync("/tmp/hindsight-coding-agents-pack.json","utf8"); const i=s.search(/\[\s*\{\s*"id"\s*:/); if(i<0) process.exit(1); const p=JSON.parse(s.slice(i))[0]; for(const f of ["dist/pi.js","dist/status.js","skill/SKILL.md","LICENSE"]) if(!p.files.some(e=>e.path===f)) process.exitCode=1'
       - name: Check generated skill and source cleanliness
         run: git diff --exit-code -- hindsight-integrations/coding-agents/skill/SKILL.md
