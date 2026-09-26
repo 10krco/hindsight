@@ -1,0 +1,36 @@
+name: Foundry coding-agent package
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: hindsight-integrations/coding-agents/package-lock.json
+      - name: Install the isolated coding-agent package without lifecycle scripts
+        working-directory: hindsight-integrations/coding-agents
+        run: npm ci --ignore-scripts
+      - name: Build the exact Git-subdirectory package Foundry consumes
+        working-directory: hindsight-integrations/coding-agents
+        run: |
+          npm run skill:build
+          npm run build
+          npx tsc --noEmit
+          npm test
+          npm pack --dry-run --ignore-scripts --json > /tmp/hindsight-coding-agents-pack.json
+          node -e 'const p=require("/tmp/hindsight-coding-agents-pack.json")[0]; for(const f of ["dist/pi.js","dist/status.js","skill/SKILL.md","LICENSE"]) if(!p.files.some(e=>e.path===f)) process.exitCode=1'
+      - name: Check generated skill and source cleanliness
+        run: git diff --exit-code -- hindsight-integrations/coding-agents/skill/SKILL.md

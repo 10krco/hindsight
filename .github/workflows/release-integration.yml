@@ -7,6 +7,8 @@ on:
 
 jobs:
   publish:
+    # Fork pins coding-agent source; it must never publish upstream packages.
+    if: github.repository == 'vectorize-io/hindsight'
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # for PyPI trusted publishing + build-provenance attestations
