@@ -502,6 +502,8 @@ export class HindsightClient {
       manage?: boolean;
       /** Extraction mode for the plugin's own strategies — see RawConfig.retainExtractionMode. */
       extractionMode?: RetainExtractionMode;
+      /** Deepen defers pages until the seed's extractions have settled. */
+      deferPages?: boolean;
     } = {}
   ): Promise<void> {
     if (opts.reset) {
@@ -526,7 +528,10 @@ export class HindsightClient {
         this.log(`[bank] applied to ${this.bank}: ${Object.keys(manifest.bank).sort().join(", ")}`);
       }
     }
-    await this.seedPages(opts.pageTrigger, opts.pages, opts.customPages);
+    // Earlier deepen called this before ingesting git/chats. An empty bank's
+    // new pages then reflected no facts, became placeholders, and `synced`
+    // reported true because it counts page *records*, not content.
+    if (!opts.deferPages) await this.seedPages(opts.pageTrigger, opts.pages, opts.customPages);
   }
 
   /**
@@ -558,16 +563,15 @@ export class HindsightClient {
    *  failed/cancelled), so filter by status. Powers syncStatus's "extractions drained" check. */
   async activeOperations(): Promise<number> {
     const r = await this.req("GET", this.bankUrl("/operations"));
-    try {
-      const j = (await r.json()) as {
-        operations?: { status?: string }[];
-        items?: { status?: string }[];
-      };
-      const ops = j.operations ?? j.items ?? [];
-      return ops.filter((o) => !TERMINAL.has((o?.status || "").toLowerCase())).length;
-    } catch {
-      return 0;
-    }
+    const j = (await r.json()) as {
+      operations?: { status?: string }[];
+      items?: { status?: string }[];
+    };
+    const ops = j?.operations ?? j?.items;
+    // An unreadable operations response is not evidence of zero active work.
+    // deepen must not seed pages against a bank whose extraction state is unknown.
+    if (!Array.isArray(ops)) throw new Error("Invalid bank operations response");
+    return ops.filter((o) => !TERMINAL.has((o?.status || "").toLowerCase())).length;
   }
 
   /**
