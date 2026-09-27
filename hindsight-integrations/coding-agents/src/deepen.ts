@@ -304,16 +304,21 @@ async function main() {
       // Even a page-less server may still consolidate retained facts after
       // drain; do not report this background pass complete while work remains.
       await waitForBank(client, "extraction/consolidation", log);
-      diag(harness.name, "knowledge_pages_unavailable", {
-        bank: FINAL_BANK,
-        apiUrl: client.apiUrl,
-      });
     } else {
       await seedPagesAfterExtraction(
         client,
         { trigger: buildPageTrigger(cfg), pages: cfg.pages, customPages: cfg.customPages },
         log
       );
+    }
+    // An absent bank leaves the initial support probe unknown. Its first
+    // retain may create the bank on a legacy server with no pages endpoint;
+    // seedPages then latches unsupported, so report the final state as well.
+    if (client.knowledgePagesSupported === false) {
+      diag(harness.name, "knowledge_pages_unavailable", {
+        bank: FINAL_BANK,
+        apiUrl: client.apiUrl,
+      });
     }
 
     const failures = chatFails + gitFails;
