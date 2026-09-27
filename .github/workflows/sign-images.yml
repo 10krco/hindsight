@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   sign:
+    if: github.repository == 'vectorize-io/hindsight'
     name: Sign ${{ matrix.image }}:${{ inputs.version }}${{ matrix.suffix }}
     runs-on: ubuntu-latest
     strategy:

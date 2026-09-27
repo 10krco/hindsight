@@ -89,7 +89,9 @@ jobs:
       tools-agent-sdk: ${{ steps.filter.outputs.tools-agent-sdk }}
       integrations-roo-code: ${{ steps.filter.outputs.integrations-roo-code }}
       dev: ${{ steps.filter.outputs.dev }}
-      ci: ${{ steps.filter.outputs.ci }}
+      # A public fork cannot run upstream paid-provider/infra jobs merely
+      # because a release guard or focused CI file changed.
+      ci: ${{ github.repository == 'vectorize-io/hindsight' && steps.filter.outputs.ci == 'true' }}
       # Secrets are available for internal PRs and workflow_dispatch.
       # Fork PRs via pull_request event do NOT have access to secrets.
       has_secrets: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
@@ -5428,10 +5430,10 @@ jobs:
 
   verify-generated-files:
     needs: [detect-changes]
-    # Unconditional for every change except one confined to
-    # hindsight-system-tests/ — no generated file in the repo is produced from
-    # that package, so it cannot drift them. See the outside-system-tests filter.
-    if: needs.detect-changes.outputs.outside-system-tests == 'true'
+    # Upstream's full API/client generator runs only in its own repository.
+    # The fork's required Foundry build instead checks the package's generated
+    # skill and packed runtime without starting unrelated server toolchains.
+    if: github.repository == 'vectorize-io/hindsight' && needs.detect-changes.outputs.outside-system-tests == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

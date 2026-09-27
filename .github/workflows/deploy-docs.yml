@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.repository == 'vectorize-io/hindsight'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -40,6 +41,7 @@ jobs:
         with:
           path: hindsight-docs/build
   deploy:
+    if: github.repository == 'vectorize-io/hindsight'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
