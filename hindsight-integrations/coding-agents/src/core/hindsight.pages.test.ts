@@ -399,6 +399,52 @@ describe("HindsightClient.seedPages", () => {
     expect(calls.some((k) => k.url.includes("/mental-models"))).toBe(false);
   });
 
+  it("counts an older active operation even after 20 newer terminal operations", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(url);
+      const status = new URL(url).searchParams.get("status");
+      const total = status === "pending" ? 1 : 0;
+      return { ok: true, status: 200, json: async () => ({
+        total, operations: total ? [{ status }] : [],
+      }) } as any;
+    }));
+    const client = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    expect(await client.activeOperations()).toBe(1);
+    expect(urls.map((url) => new URL(url).searchParams.get("status")))
+      .toEqual(["pending", "processing"]);
+    expect(urls.every((url) => new URL(url).searchParams.get("limit") === "1")).toBe(true);
+  });
+
+  it("does not mistake an unreadable, unfiltered or incomplete operations response for an idle bank", async () => {
+    const calls: any[] = [];
+    stubFetch(calls);
+    const client = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    await expect(client.activeOperations()).rejects.toThrow("Invalid bank operations response");
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200,
+      json: async () => ({ total: 1, operations: [{ status: "completed" }] }),
+    })) as any);
+    await expect(client.activeOperations()).rejects.toThrow("Invalid bank operations response");
+  });
+
+  it("can configure the bank without writing page records until extraction has settled", async () => {
+    const calls: any[] = [];
+    stubFetch(calls);
+    const client = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    await client.configureBank({ deferPages: true });
+    expect(calls.some((call) => call.method === "POST" && call.url.endsWith("/import"))).toBe(true);
+    expect(calls.some((call) => call.url.includes("/knowledge-base/"))).toBe(false);
+
+    // This is the second half of deepen's page-last ordering. An empty bank
+    // must not get searchable placeholder pages before its git facts exist.
+    await client.seedPages();
+    const pagePosts = calls.filter((call) => call.method === "POST" && call.url.endsWith("/knowledge-base/pages"));
+    expect(pagePosts).toHaveLength(PAGES.length);
+    const importedAt = calls.findIndex((call) => call.method === "POST" && call.url.endsWith("/import"));
+    expect(calls.findIndex((call) => call.method === "POST" && call.url.endsWith("/knowledge-base/pages")))
+      .toBeGreaterThan(importedAt);
+  });
+
   // The trigger decides what these pages cost to keep current (#3506); it used to be hardcoded.
   it("stamps the configured refresh policy on every page it seeds", async () => {
     const calls: any[] = [];

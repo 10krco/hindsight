@@ -8,11 +8,11 @@
  * running. Agents get it as the `hindsight_sync_status` tool; harnesses (e.g. the benchmark) poll
  * the same via `dist/status.js`.
  *
- * `synced` is the completion marker for the REQUIRED memory: gitlog seeded, pages created, and no
- * extraction operation still active. The deepen engine creates pages LAST (after draining its
- * enqueued extractions), so `synced` implies the seed's facts are queryable. The per-commit diff
- * trickle deliberately does NOT gate `synced` — it deepens across sessions and is a bonus, not a
- * prerequisite.
+ * `synced` counts the gitlog document, page records and active operations, not synthesized page
+ * bodies or successful extraction outcomes. The deepen engine creates pages AFTER its extractions
+ * settle, but a failed page refresh may still leave a placeholder and report `synced: true`;
+ * consumers needing readable memory must check the page body separately. The per-commit diff
+ * trickle deliberately does NOT gate `synced` — it deepens across sessions and is a bonus.
  */
 import { execFileSync } from "node:child_process";
 import { commitsSince, repoNameOf } from "./git";

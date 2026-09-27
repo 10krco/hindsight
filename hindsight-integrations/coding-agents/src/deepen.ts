@@ -14,8 +14,9 @@
  *   4. progressively DEEPEN: ingest the next batch of not-yet-ingested commits individually with
  *      their full diffs, NEWEST first (recent decisions matter most), up to DIFF_BATCH per run and
  *      DEEPEN_DIFF_TARGET total — full precision arrives across sessions without a big-bang ingest
- *   5. drain this run's extractions, then create the knowledge pages if the bank has none —
- *      pages-last makes `syncStatus().synced` a real completion marker
+ *   5. drain this run's extractions and the bank's consolidations, then create/reconcile
+ *      knowledge pages, and wait for their refresh operations. Page bodies still need to be
+ *      read before a consumer treats `syncStatus().synced` as synthesized content.
  *
  * A per-bank lock file makes concurrent session starts a no-op (stale locks expire).
  */
@@ -30,6 +31,7 @@ import { commitsSince, repoNameOf, retainCommit, syncGitLog } from "./core/git";
 import { SURVEY_DOC_IDS } from "./core/survey";
 import { buildPageTrigger } from "./core/missions";
 import { HindsightClient } from "./core/hindsight";
+import { seedPagesAfterExtraction, waitForBank } from "./core/deepen-pages";
 import { DEEPEN_DIFF_TARGET } from "./core/status";
 import type { ChatSession } from "./core/types";
 import { pool } from "./core/util";
@@ -168,12 +170,15 @@ async function main() {
       customPages: cfg.customPages,
       manage: cfg.manageBankConfig,
       extractionMode: cfg.retainExtractionMode,
+      deferPages: true,
     });
-    if (client.knowledgePagesSupported === false) {
-      diag(harness.name, "knowledge_pages_unavailable", {
-        bank: FINAL_BANK,
-        apiUrl: client.apiUrl,
-      });
+    // A legacy server with no knowledge-base surface can still ingest git and
+    // chats. Probe once before ingestion so that only modern page-capable banks
+    // require the operations read-back needed to safely seed pages last.
+    try {
+      await client.listPages();
+    } catch (e) {
+      if (client.knowledgePagesSupported !== false) throw e;
     }
 
     const gitIds = await client.listDocumentIds("source:git", "all_strict");
@@ -294,25 +299,27 @@ async function main() {
       /* cosmetics — best-effort */
     }
 
-    await client.drain(client.opIds, "extraction");
-
-    // The drain above only covers operations THIS run enqueued — consolidation and the template's
-    // page refreshes run server-side on their own schedule. `synced` requires ZERO active ops, so
-    // wait (bounded) for the bank to fully settle before declaring the run complete.
-    const settleDeadline = Date.now() + 15 * 60 * 1000;
-    for (;;) {
-      const active = await client.activeOperations().catch(() => 0);
-      if (active === 0) break;
-      if (Date.now() > settleDeadline) {
-        log(`[deepen] ${active} server-side op(s) still active at settle timeout — proceeding`);
-        break;
-      }
-      log(`[deepen] waiting for ${active} server-side op(s) to settle …`);
-      await new Promise((r) => setTimeout(r, 5000));
+    if (client.knowledgePagesSupported === false) {
+      await client.drain(client.opIds, "extraction");
+      // Even a page-less server may still consolidate retained facts after
+      // drain; do not report this background pass complete while work remains.
+      await waitForBank(client, "extraction/consolidation", log);
+    } else {
+      await seedPagesAfterExtraction(
+        client,
+        { trigger: buildPageTrigger(cfg), pages: cfg.pages, customPages: cfg.customPages },
+        log
+      );
     }
-    // (knowledge pages need no separate pass: configureBank seeds them through the knowledge-base
-    // API every run, matched by name — syncStatus's `synced` stays sound because it also requires
-    // the gitlog seed present AND zero active extraction operations.)
+    // An absent bank leaves the initial support probe unknown. Its first
+    // retain may create the bank on a legacy server with no pages endpoint;
+    // seedPages then latches unsupported, so report the final state as well.
+    if (client.knowledgePagesSupported === false) {
+      diag(harness.name, "knowledge_pages_unavailable", {
+        bank: FINAL_BANK,
+        apiUrl: client.apiUrl,
+      });
+    }
 
     const failures = chatFails + gitFails;
     diag("deepen", "deepen_done", {
