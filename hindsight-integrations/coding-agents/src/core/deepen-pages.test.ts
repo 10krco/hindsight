@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { seedPagesAfterExtraction } from "./deepen-pages";
+import { seedPagesAfterExtraction, waitForBank } from "./deepen-pages";
 import { buildPageTrigger } from "./missions";
 import type { HindsightClient } from "./hindsight";
 
@@ -45,6 +45,22 @@ describe("deepen page-last ordering", () => {
     await expect(seedPagesAfterExtraction(client, options, () => {}))
       .rejects.toThrow("operations API unavailable");
     expect(seedPages).not.toHaveBeenCalled();
+  });
+
+  it("also waits for page-less banks to finish asynchronous consolidation", async () => {
+    vi.useFakeTimers();
+    const statuses = [1, 0];
+    const observed: number[] = [];
+    const bank = { activeOperations: async () => {
+      const active = statuses.shift();
+      if (active === undefined) throw new Error("unexpected poll");
+      observed.push(active);
+      return active;
+    } };
+    const run = waitForBank(bank, "extraction/consolidation", () => {});
+    await vi.advanceTimersByTimeAsync(5000);
+    await run;
+    expect(observed).toEqual([1, 0]);
   });
 
   it("does not seed pages when this run's drain fails", async () => {

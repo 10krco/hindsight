@@ -31,7 +31,7 @@ import { commitsSince, repoNameOf, retainCommit, syncGitLog } from "./core/git";
 import { SURVEY_DOC_IDS } from "./core/survey";
 import { buildPageTrigger } from "./core/missions";
 import { HindsightClient } from "./core/hindsight";
-import { seedPagesAfterExtraction } from "./core/deepen-pages";
+import { seedPagesAfterExtraction, waitForBank } from "./core/deepen-pages";
 import { DEEPEN_DIFF_TARGET } from "./core/status";
 import type { ChatSession } from "./core/types";
 import { pool } from "./core/util";
@@ -301,6 +301,9 @@ async function main() {
 
     if (client.knowledgePagesSupported === false) {
       await client.drain(client.opIds, "extraction");
+      // Even a page-less server may still consolidate retained facts after
+      // drain; do not report this background pass complete while work remains.
+      await waitForBank(client, "extraction/consolidation", log);
       diag(harness.name, "knowledge_pages_unavailable", {
         bank: FINAL_BANK,
         apiUrl: client.apiUrl,

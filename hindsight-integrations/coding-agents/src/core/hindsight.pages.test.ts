@@ -399,10 +399,31 @@ describe("HindsightClient.seedPages", () => {
     expect(calls.some((k) => k.url.includes("/mental-models"))).toBe(false);
   });
 
-  it("does not mistake an unreadable operations response for an idle bank", async () => {
+  it("counts an older active operation even after 20 newer terminal operations", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(url);
+      const status = new URL(url).searchParams.get("status");
+      const total = status === "pending" ? 1 : 0;
+      return { ok: true, status: 200, json: async () => ({
+        total, operations: total ? [{ status }] : [],
+      }) } as any;
+    }));
+    const client = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    expect(await client.activeOperations()).toBe(1);
+    expect(urls.map((url) => new URL(url).searchParams.get("status")))
+      .toEqual(["pending", "processing"]);
+    expect(urls.every((url) => new URL(url).searchParams.get("limit") === "1")).toBe(true);
+  });
+
+  it("does not mistake an unreadable, unfiltered or incomplete operations response for an idle bank", async () => {
     const calls: any[] = [];
     stubFetch(calls);
     const client = new HindsightClient({ apiUrl: "http://x", bank: "repo-a" });
+    await expect(client.activeOperations()).rejects.toThrow("Invalid bank operations response");
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200,
+      json: async () => ({ total: 1, operations: [{ status: "completed" }] }),
+    })) as any);
     await expect(client.activeOperations()).rejects.toThrow("Invalid bank operations response");
   });
 

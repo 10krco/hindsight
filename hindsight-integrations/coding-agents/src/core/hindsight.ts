@@ -559,19 +559,26 @@ export class HindsightClient {
     await this.req("DELETE", this.bankUrl(`/documents/${encodeURIComponent(documentId)}`));
   }
 
-  /** Count of operations still ACTIVE on this bank — the list includes terminal ops (completed/
-   *  failed/cancelled), so filter by status. Powers syncStatus's "extractions drained" check. */
+  /** Count pending and processing bank operations, including older ones hidden
+   *  behind the default 20-most-recent list page. Each filtered request returns
+   *  the server's bank-wide total; reading only the first unfiltered page could
+   *  seed knowledge pages while an older consolidation is still in flight. */
   async activeOperations(): Promise<number> {
-    const r = await this.req("GET", this.bankUrl("/operations"));
-    const j = (await r.json()) as {
-      operations?: { status?: string }[];
-      items?: { status?: string }[];
-    };
-    const ops = j?.operations ?? j?.items;
-    // An unreadable operations response is not evidence of zero active work.
-    // deepen must not seed pages against a bank whose extraction state is unknown.
-    if (!Array.isArray(ops)) throw new Error("Invalid bank operations response");
-    return ops.filter((o) => !TERMINAL.has((o?.status || "").toLowerCase())).length;
+    let active = 0;
+    for (const status of ["pending", "processing"] as const) {
+      const r = await this.req("GET", this.bankUrl(`/operations?status=${status}&limit=1&offset=0`));
+      const j = (await r.json()) as { total?: number; operations?: { status?: string }[] };
+      // A missing/invalid count, or a server ignoring the filter, does not
+      // establish an idle bank. Both deepen and page refresh must fail closed.
+      const total = j?.total;
+      if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 ||
+          !Array.isArray(j.operations) || j.operations.length !== Math.min(total, 1) ||
+          j.operations.some((op) => op?.status?.toLowerCase() !== status)) {
+        throw new Error("Invalid bank operations response");
+      }
+      active += total;
+    }
+    return active;
   }
 
   /**
